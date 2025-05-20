@@ -5,11 +5,17 @@ import { z } from "zod";
 // 로컬 개발 시 .env.local 파일에 아래와 같이 키를 설정해야 합니다.
 // ORCID_API_BASE_URL=https://pub.orcid.org/v3.0
 // DEEPSEEK_API_KEY=your_deepseek_api_key
-// OPENAI_API_KEY=your_openai_api_key
+// DEEPSEEK_BASE_URL=https://api.deepseek.com (예시, 실제 URL 확인 필요)
+// DEEPSEEK_EMBEDDING_MODEL=deepseek-embed (예시, 실제 모델명 확인 필요)
+// DEEPSEEK_EMBEDDING_VECTOR_PATH=data.0.embedding_vector (예시, 실제 경로 확인 필요)
 
 const ORCID_API_BASE_URL = process.env.ORCID_API_BASE_URL || "https://pub.orcid.org/v3.0";
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
-// const OPENAI_API_KEY = process.env.OPENAI_API_KEY; // OpenAI API 키 변수 제거
+const DEEPSEEK_BASE_URL = process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com";
+const DEEPSEEK_CHAT_MODEL = "deepseek-chat"; // 기존 채팅 모델
+const DEEPSEEK_EMBEDDING_MODEL = process.env.DEEPSEEK_EMBEDDING_MODEL || "deepseek-embed"; // 예시 임베딩 모델
+// DeepSeek 임베딩 API 응답에서 실제 벡터 경로 (예: data.0.embedding_vector)
+const DEEPSEEK_EMBEDDING_VECTOR_PATH = process.env.DEEPSEEK_EMBEDDING_VECTOR_PATH || "data.0.embedding"; // 기본값은 이전 코드와 동일하게, 필요시 .env로 수정
 
 // let openai: OpenAI | null = null; // OpenAI 클라이언트 변수 제거
 // if (OPENAI_API_KEY) {
@@ -30,12 +36,13 @@ interface LabRecommendation {
   logoUrl: string;
   name: string;
   keywords: string[];
-  matchRate: number;
+  matchRate: number; // 유사도 점수 또는 LLM 기반 matchRate
   projects: string[];
   publicationTrends: { year: string | number; count: number }[];
   memberCount: number;
   mentors: MentorRecommendation[];
   careerScenario: string;
+  similarityScore?: number; // 임베딩 유사도 점수 (선택적)
 }
 
 interface MentorRecommendation {
@@ -65,7 +72,106 @@ const MOCK_API_RESPONSE: LabRecommendation[] = [
   },
 ];
 
+// --- Helper 함수 ---
+function dotProduct(vecA: number[], vecB: number[]): number {
+  return vecA.reduce((sum, val, i) => sum + val * vecB[i], 0);
+}
+
+function magnitude(vec: number[]): number {
+  return Math.sqrt(vec.reduce((sum, val) => sum + val * val, 0));
+}
+
+function cosineSimilarity(vecA: number[], vecB: number[]): number {
+  if (!vecA || !vecB || vecA.length === 0 || vecB.length === 0 || vecA.length !== vecB.length) {
+    console.warn("[API Route] Invalid vectors for cosine similarity:", {vecA_len: vecA?.length, vecB_len: vecB?.length});
+    return 0; // 유효하지 않은 입력 처리
+  }
+  const prod = dotProduct(vecA, vecB);
+  const magA = magnitude(vecA);
+  const magB = magnitude(vecB);
+  if (magA === 0 || magB === 0) {
+    return 0; // 제로 벡터 처리
+  }
+  return prod / (magA * magB);
+}
+
+function normalizeOrcidId(id: string | null | undefined): string | null {
+  if (!id) return null;
+  return id.toLowerCase().replace(/-/g, "");
+}
+
+// 경로 문자열을 기반으로 객체에서 값을 안전하게 가져오는 함수
+function getValueByPath(obj: any, path: string): any {
+  if (!obj || !path) return undefined;
+  const keys = path.split('.');
+  let current = obj;
+  for (const key of keys) {
+    if (current === null || typeof current !== 'object') return undefined;
+    const arrayMatch = key.match(/^(\w+)\[(\d+)\]$/); // 배열 인덱스 처리 (예: data[0])
+    if (arrayMatch) {
+      current = current[arrayMatch[1]];
+      if (Array.isArray(current)) {
+        current = current[parseInt(arrayMatch[2], 10)];
+      } else {
+        return undefined;
+      }
+    } else {
+      current = current[key];
+    }
+    if (current === undefined) return undefined;
+  }
+  return current;
+}
+
 // --- API 호출 및 데이터 처리 함수 ---
+
+async function embedTextWithDeepSeek(text: string): Promise<number[] | null> {
+  if (!DEEPSEEK_API_KEY) {
+    console.warn("[API Route] DEEPSEEK_API_KEY is not set. Text embedding will be skipped.");
+    return null;
+  }
+  if (!text || text.trim() === "") {
+    console.warn("[API Route] Empty text provided for embedding. Skipping.");
+    return null;
+  }
+
+  const embeddingUrl = `${DEEPSEEK_BASE_URL}/v1/embeddings`; // DeepSeek 임베딩 엔드포인트 확인 필요
+  console.log(`[API Route] Requesting embedding for text (first 50 chars): "${text.substring(0, 50)}..." from ${embeddingUrl}`);
+
+  try {
+    const response = await fetch(embeddingUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${DEEPSEEK_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: DEEPSEEK_EMBEDDING_MODEL, // DeepSeek에서 제공하는 임베딩 모델명 사용
+        input: [text], // 일부 모델은 배열 형태로 입력을 받을 수 있음, 혹은 단일 문자열
+      }),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      console.error(`[API Route] DeepSeek Embedding API Error: ${response.status} - ${errorBody}`);
+      throw new Error(`DeepSeek Embedding API 요청 실패 (상태: ${response.status})`);
+    }
+
+    const result = await response.json();
+    // DeepSeek API 응답 구조에 따라 임베딩 벡터 추출 경로 수정 필요
+    // DEEPSEEK_EMBEDDING_VECTOR_PATH 환경 변수 사용
+    const embedding = getValueByPath(result, DEEPSEEK_EMBEDDING_VECTOR_PATH);
+    
+    if (!embedding || !Array.isArray(embedding) || embedding.some(isNaN)) {
+      console.error("[API Route] Failed to extract valid embedding vector from DeepSeek response using path '" + DEEPSEEK_EMBEDDING_VECTOR_PATH + "':", JSON.stringify(result).substring(0,500));
+      return null;
+    }
+    return embedding;
+  } catch (error: any) {
+    console.error("[API Route] DeepSeek Embedding API request failed:", error.message);
+    return null;
+  }
+}
 
 async function searchOrcid(query: string, rows: number = 10): Promise<any[]> {
   const url = `${ORCID_API_BASE_URL}/search/?q=${encodeURIComponent(query)}&rows=${rows}`;
@@ -87,65 +193,77 @@ async function searchOrcid(query: string, rows: number = 10): Promise<any[]> {
   }
 }
 
-async function analyzeWithDeepSeek(userProfile: z.infer<typeof recommendationRequestSchema>, orcidResults: any[]): Promise<LabRecommendation[]> {
+async function analyzeWithDeepSeek(userProfile: z.infer<typeof recommendationRequestSchema>, orcidItemsForLLM: any[], userQueryForLLM: string): Promise<LabRecommendation[]> {
   if (!DEEPSEEK_API_KEY) {
-    console.warn("[API Route] DEEPSEEK_API_KEY is not set. Returning mock data.");
+    console.warn("[API Route] DEEPSEEK_API_KEY is not set. Returning mock data for analysis.");
     return MOCK_API_RESPONSE;
   }
-  if (orcidResults.length === 0) {
-    console.log("[API Route] No ORCID results to analyze. Returning mock data.");
+  
+  if (orcidItemsForLLM.length === 0) {
+    console.log("[API Route] No ORCID items to analyze for LLM. Returning mock data.");
     return MOCK_API_RESPONSE;
   }
 
-  const documentsForAnalysis = orcidResults.map(item => {
-    const title = item?.["title"]?.[0]?.title?.value || item?.["name"]?.value || "제목/이름 없음";
-    const summary = item?.["summary"]?.[0]?.value || item?.["biography"]?.value || "요약 정보 없음";
-    const orcidId = item?.["orcid-identifier"]?.path || item?.["put-code"] || `unknown-id-${Math.random().toString(36).substring(7)}`;
-    const keywords = item?.["keywords"]?.value?.join(', ') || "키워드 없음";
-    return `ID: ${orcidId}\nTitle/Name: ${title}\nSummary/Bio: ${summary}\nKeywords: ${keywords}`;
+  // LLM에 전달할 문서 형식화: 각 item은 orcidId와 content를 포함해야 함
+  const documentsForAnalysis = orcidItemsForLLM.map(item => {
+    // item.id는 ORCID ID 여야 함 (searchOrcid 결과에서 추출 또는 생성 시 주의)
+    // item.content는 임베딩 및 LLM 분석에 사용될 텍스트
+    const orcidId = item.id || `unknown-id-${Math.random().toString(36).substring(7)}`;
+    const content = item.content || "내용 없음";
+    const similarityInfo = item.similarityScore ? `(계산된 유사도: ${(item.similarityScore * 100).toFixed(0)}%)` : "";
+    return `ORCID ID: ${orcidId} ${similarityInfo}
+연구 내용 요약: ${content}`;
   }).join("\n---\n");
   
-  console.log("[API Route] Documents for DeepSeek analysis:", documentsForAnalysis.substring(0, 500) + "...");
+  console.log("[API Route] Documents for DeepSeek analysis (first 500 chars):", documentsForAnalysis.substring(0, 500) + "...");
+  
+  const prompt = `당신은 연구실 추천 전문가입니다. 다음 사용자 프로필과 제공된 연구자/문서 목록(ORCID 기반, 관련도 순으로 일부 필터링됨)을 참고하여, 사용자에게 가장 적합한 연구실 3-5개를 추천하고, 각 연구실별 가능한 멘토 1-2명을 제시해주세요.
 
-  const prompt = `... (이전 프롬프트와 유사하게 유지, 필요시 JSON 구조 명확화) ...
-    당신은 연구실 추천 전문가입니다. 주어진 사용자 프로필과 ORCID 검색 결과를 바탕으로, 가장 적합한 연구실 3~5개를 추천하고, 각 연구실별 멘토 1~2명을 제시해주세요.
-    반드시 다음 JSON 형식의 배열을 반환해야 합니다. 각 객체는 LabRecommendation 타입을 따라야 합니다.
-    logoUrl과 mentor의 avatarUrl은 "https://picsum.photos/seed/UNIQUE_SEED/SIZE" 형식으로 생성해주세요.
-    matchRate (0-100), projects, publicationTrends, memberCount 등은 현실적으로 추정하여 채워주세요.
-    careerScenario 필드는 이 단계에서는 "AI 커리어 시나리오 생성 예정..."으로 설정해주세요.
+사용자 질의: ${userQueryForLLM}
+사용자 프로필: 전공 ${userProfile.major}, 관심 키워드 ${userProfile.keywords}, 학력 ${userProfile.educationLevel}${userProfile.additionalInfo ? `, 추가 정보: ${userProfile.additionalInfo}` : ''}.
 
-    JSON 응답 형식:
-    [
-      {
-        "id": "(orcid-id 또는 생성된 고유 ID)",
-        "logoUrl": "https://picsum.photos/seed/lab_seed_example/100/100",
-        "name": "(추천 연구소명)",
-        "keywords": ["키워드1", "키워드2"],
-        "matchRate": 85,
-        "projects": ["프로젝트 예시 1", "프로젝트 예시 2"],
-        "publicationTrends": [{ "year": "2022", "count": 10 }, { "year": "2023", "count": 12 }],
-        "memberCount": 20,
-        "mentors": [
-          { "id": "(mentor-orcid-id 또는 생성된 고유 ID)", "avatarUrl": "https://picsum.photos/seed/mentor_seed_example/80/80", "name": "(멘토 이름)", "title": "(직책)", "profile": "(연구분야 및 간략소개)" }
-        ],
-        "careerScenario": "AI 커리어 시나리오 생성 예정..."
-      }
-      // ... 추가 추천 연구소들
-    ]
-  `;
-  // 실제 프롬프트는 이전 단계에서 생성된 상세 프롬프트를 사용해야 함
-  // 여기서는 간략화된 설명을 추가
+제공된 연구자/문서 목록:
+---
+${documentsForAnalysis}
+---
+
+응답 지침:
+1. 반드시 아래 명시된 JSON 형식의 배열을 반환해야 합니다.
+2. 각 추천 연구실 객체의 'id' 필드에는 해당 연구실의 대표 연구자 ORCID ID (형식: 0000-0001-2345-6789) 또는 가장 관련있는 문서의 ORCID ID를 사용해야 합니다. 만약 적절한 ORCID ID가 없다면, "temp-lab-id-"로 시작하는 임시 ID를 생성하세요.
+3. 'mentors' 배열의 각 멘토 객체 'id' 필드에도 가능하다면 ORCID ID를 사용하고, 없다면 "temp-mentor-id-"로 시작하는 임시 ID를 생성하세요.
+4. logoUrl과 mentor의 avatarUrl은 "https://picsum.photos/seed/UNIQUE_SEED/SIZE" 형식으로 생성해주세요.
+5. matchRate (0-100 사이의 수치로, 사용자와의 적합도), projects, publicationTrends, memberCount 등은 현실적으로 추정하여 채워주세요.
+6. careerScenario 필드는 "AI 커리어 시나리오 생성 예정..."으로 설정해주세요.
+
+JSON 응답 형식:
+[
+  {
+    "id": "(ORCID ID 또는 임시 ID)",
+    "logoUrl": "https://picsum.photos/seed/lab_seed_example/100/100",
+    "name": "(추천 연구소명)",
+    "keywords": ["키워드1", "키워드2"],
+    "matchRate": 85, 
+    "projects": ["프로젝트 예시 1", "프로젝트 예시 2"],
+    "publicationTrends": [{ "year": "2022", "count": 10 }, { "year": "2023", "count": 12 }],
+    "memberCount": 20,
+    "mentors": [
+      { "id": "(ORCID ID 또는 임시 ID)", "avatarUrl": "https://picsum.photos/seed/mentor_seed_example/80/80", "name": "(멘토 이름)", "title": "(직책)", "profile": "(연구분야 및 간략소개)" }
+    ],
+    "careerScenario": "AI 커리어 시나리오 생성 예정..."
+  }
+  // ... (다른 추천 연구실 객체들)
+]`;
 
   try {
-    console.log("[API Route] Sending request to DeepSeek API...");
-    const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
+    console.log("[API Route] Sending request to DeepSeek API (Chat Completion)...");
+    const response = await fetch(`${DEEPSEEK_BASE_URL}/v1/chat/completions`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${DEEPSEEK_API_KEY}` },
       body: JSON.stringify({
-        model: "deepseek-chat",
-        messages: [{ role: "user", content: prompt }], // 실제로는 더 자세한 프롬프트가 필요
-        temperature: 0.3, // 좀 더 일관된 결과를 위해 온도 낮춤
-        max_tokens: 2500, // 충분한 토큰
+        model: DEEPSEEK_CHAT_MODEL,
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.3,
+        max_tokens: 2500,
         response_format: { type: "json_object" }
       }),
     });
@@ -175,11 +293,10 @@ async function analyzeWithDeepSeek(userProfile: z.infer<typeof recommendationReq
               parsedLabs = parsedLabs.recommendations;
           } else if (parsedLabs.labs && Array.isArray(parsedLabs.labs)) {
               parsedLabs = parsedLabs.labs;
+          } else if (Array.isArray(parsedLabs.results)) { // 다양한 가능한 키값 시도
+              parsedLabs = parsedLabs.results; 
           } else {
-            // 예상치 못한 구조일 경우, content 전체를 배열로 감싸서 시도해볼 수 있음 (단, LLM이 단일 객체를 반환한 경우)
-            // console.warn("[API Route] DeepSeek response is a single object, attempting to wrap in array.");
-            // parsedLabs = [parsedLabs]; // 이 방법은 주의해서 사용
-            throw new Error("DeepSeek API 응답이 예상된 배열 형식이 아닙니다. (객체 내 배열 누락)");
+            throw new Error("DeepSeek API 응답이 예상된 배열 형식이 아닙니다. (객체 내 추천 배열 누락)");
           }
       }
       
@@ -189,8 +306,8 @@ async function analyzeWithDeepSeek(userProfile: z.infer<typeof recommendationReq
       }
 
       return parsedLabs.map((lab: any, index: number) => ({
-        id: lab.id || `ds-lab-${Date.now()}-${index}`,
-        logoUrl: lab.logoUrl || `https://picsum.photos/seed/ds_lab_${lab.name || index}/100/100`,
+        id: lab.id || `temp-lab-${Date.now()}-${index}`, // LLM이 ID를 제공하지 않으면 임시 ID
+        logoUrl: lab.logoUrl || `https://picsum.photos/seed/ds_lab_${normalizeOrcidId(lab.name) || index}/100/100`,
         name: lab.name || "이름 없는 연구소",
         keywords: Array.isArray(lab.keywords) ? lab.keywords : [],
         matchRate: typeof lab.matchRate === 'number' ? Math.min(100, Math.max(0, lab.matchRate)) : 75,
@@ -198,13 +315,14 @@ async function analyzeWithDeepSeek(userProfile: z.infer<typeof recommendationReq
         publicationTrends: Array.isArray(lab.publicationTrends) ? lab.publicationTrends.map((pt:any) => ({year: String(pt.year), count: Number(pt.count) || 0})) : [],
         memberCount: typeof lab.memberCount === 'number' ? lab.memberCount : 0,
         mentors: Array.isArray(lab.mentors) ? lab.mentors.map((mentor: any, mIndex: number) => ({
-          id: mentor.id || `ds-mentor-${Date.now()}-${index}-${mIndex}`,
-          avatarUrl: mentor.avatarUrl || `https://picsum.photos/seed/ds_mentor_${mentor.name || mIndex}/80/80`,
+          id: mentor.id || `temp-mentor-${Date.now()}-${index}-${mIndex}`, // LLM이 ID를 제공하지 않으면 임시 ID
+          avatarUrl: mentor.avatarUrl || `https://picsum.photos/seed/ds_mentor_${normalizeOrcidId(mentor.name) || mIndex}/80/80`,
           name: mentor.name || "이름 없는 멘토",
           title: mentor.title || "직책 정보 없음",
           profile: mentor.profile || "프로필 정보 없음",
         })) : [],
         careerScenario: lab.careerScenario || "AI 커리어 시나리오 생성 예정...",
+        similarityScore: lab.similarityScore || 0,
       }));
     } catch (e: any) {
       console.error("[API Route] DeepSeek response JSON parsing error:", e.message, "Raw content was:", content);
@@ -281,17 +399,116 @@ export async function POST(request: Request) {
     let recommendedLabs: LabRecommendation[] = [];
 
     try {
-        const orcidQuery = `${userData.keywords} ${userData.major}`;
-        const orcidResults = await searchOrcid(orcidQuery, 10);
-        console.log(`[API Route] Found ${orcidResults.length} results from ORCID.`);
+        const orcidQuery = `${userData.keywords} ${userData.major}`; // ORCID 검색용 기본 쿼리
+        let orcidResults = await searchOrcid(orcidQuery, 30); // 유사도 계산 및 LLM 전달을 위해 충분한 결과 요청 (예: 30개)
+        console.log(`[API Route] Found ${orcidResults.length} results from ORCID for initial query.`);
 
-        recommendedLabs = await analyzeWithDeepSeek(userData, orcidResults);
+        const userTextForEmbedding = `${userData.major} ${userData.keywords} ${userData.educationLevel} ${userData.additionalInfo || ''}`.trim();
+        const userEmbedding = await embedTextWithDeepSeek(userTextForEmbedding);
+
+        let processedOrcidItemsForLLM: any[] = []; // LLM에 최종 전달될 아이템 목록 (ID와 content 포함)
+
+        if (userEmbedding && orcidResults.length > 0) {
+          console.log("[API Route] Calculating similarity scores for ORCID results...");
+          
+          const orcidItemsWithText = orcidResults.map(item => {
+            const orcidId = item?.["orcid-identifier"]?.path; // ORCID ID 추출
+            const title = item?.["title"]?.[0]?.title?.value || item?.["name"]?.value || "";
+            const summary = item?.["summary"]?.[0]?.value || item?.["biography"]?.value || "";
+            const workSummaries = item.group?.['work-summary']?.map((ws: any) => {
+                const workTitle = ws.title?.title?.value || "";
+                const journalTitle = ws['journal-title']?.value || "";
+                return `${workTitle} ${journalTitle}`;
+            }).join(" ") || "";
+            const keywordsText = item?.["keywords"]?.value?.join(' ') || '';
+            const contentForEmbedding = `${title} ${summary} ${keywordsText} ${workSummaries}`.trim();
+            return { item, orcidId, contentForEmbedding }; // 원본 item, orcidId, 임베딩용 텍스트 포함
+          }).filter(data => data.orcidId && data.contentForEmbedding.length > 0);
+
+          const similarityTasks = orcidItemsWithText.map(async (data) => {
+            const orcidItemEmbedding = await embedTextWithDeepSeek(data.contentForEmbedding);
+            if (orcidItemEmbedding) {
+              const similarity = cosineSimilarity(userEmbedding, orcidItemEmbedding);
+              return { ...data.item, id: data.orcidId, content: data.contentForEmbedding, similarityScore: similarity }; // 원본 item 정보에 id, content, 유사도 추가
+            }
+            return { ...data.item, id: data.orcidId, content: data.contentForEmbedding, similarityScore: 0 }; // 임베딩 실패 시 유사도 0
+          });
+
+          const resultsWithSimilarity = await Promise.all(similarityTasks);
+          
+          processedOrcidItemsForLLM = resultsWithSimilarity
+            .filter(item => item.similarityScore > 0.1) // 최소 유사도 임계값 (예: 0.1, 조정 가능)
+            .sort((a, b) => b.similarityScore - a.similarityScore)
+            .slice(0, 10); // LLM에 전달할 상위 10개 결과
+          
+          console.log(`[API Route] Filtered and sorted ${processedOrcidItemsForLLM.length} ORCID items by similarity for LLM.`);
+          if(processedOrcidItemsForLLM.length === 0 && orcidResults.length > 0) {
+            console.warn("[API Route] No ORCID items after similarity filtering, using original top 5 ORCID items for LLM if available.");
+            // 원본 ORCID 결과에서 텍스트를 다시 만들어 LLM에 전달
+            processedOrcidItemsForLLM = orcidResults.slice(0,5).map(item => {
+                const orcidId = item?.["orcid-identifier"]?.path;
+                const title = item?.["title"]?.[0]?.title?.value || item?.["name"]?.value || "";
+                const summary = item?.["summary"]?.[0]?.value || item?.["biography"]?.value || "";
+                return { id: orcidId, content: `${title} ${summary}`.trim() }; // 간략한 정보로 LLM 전달
+            }).filter(item => item.id && item.content);
+          }
+
+        } else {
+          console.warn("[API Route] User embedding failed or no initial ORCID results. Using top 5 original ORCID results for LLM if available.");
+          processedOrcidItemsForLLM = orcidResults.slice(0, 5).map(item => {
+            const orcidId = item?.["orcid-identifier"]?.path;
+            const title = item?.["title"]?.[0]?.title?.value || item?.["name"]?.value || "";
+            const summary = item?.["summary"]?.[0]?.value || item?.["biography"]?.value || "";
+            return { id: orcidId, content: `${title} ${summary}`.trim() };
+        }).filter(item => item.id && item.content);
+        }
+        
+        const userQueryForLLM = userTextForEmbedding; 
+
+        // 디버깅: LLM에 전달될 ID 목록 출력
+        console.debug("[API Route] ORCID Item IDs being passed to LLM:", processedOrcidItemsForLLM.map(i => i.id));
+
+        recommendedLabs = await analyzeWithDeepSeek(userData, processedOrcidItemsForLLM, userQueryForLLM);
         console.log(`[API Route] Received ${recommendedLabs.length} recommendations from DeepSeek analysis.`);
 
-        if (recommendedLabs.length === 0) {
-            console.warn("[API Route] No recommendations from DeepSeek, falling back to mock data.");
-            recommendedLabs = MOCK_API_RESPONSE; // 목업 데이터로 대체
-            // 사용자에게 알릴 수 있는 메시지 추가 가능성
+        // 디버깅: LLM으로부터 받은 ID 목록 출력
+        console.debug("[API Route] Lab IDs received from LLM:", recommendedLabs.map(l => l.id));
+
+        recommendedLabs = recommendedLabs.map(lab => {
+            const normalizedLabId = normalizeOrcidId(lab.id);
+            const matchedOrcidItem = processedOrcidItemsForLLM.find(item => normalizeOrcidId(item.id) === normalizedLabId);
+            
+            let finalMatchRate = lab.matchRate; // LLM이 제공한 matchRate 기본 사용
+            let finalSimilarityScore = matchedOrcidItem?.similarityScore ? parseFloat((matchedOrcidItem.similarityScore * 100).toFixed(2)) : undefined;
+
+            if (matchedOrcidItem?.similarityScore !== undefined) {
+                // LLM의 matchRate와 계산된 유사도 점수를 조합하거나 선택할 수 있음
+                // 여기서는 LLM의 matchRate를 우선하되, similarityScore도 기록
+                if (finalMatchRate === undefined || finalMatchRate < (matchedOrcidItem.similarityScore * 100)) {
+                     // LLM이 matchRate를 안줬거나, 계산된 유사도가 더 높으면 그걸로 일부 반영
+                    finalMatchRate = parseFloat((matchedOrcidItem.similarityScore * 100).toFixed(0));
+                }
+            } else if (finalMatchRate === undefined) {
+                finalMatchRate = 70; // 기본값, 매칭되는 ORCID 아이템 없을 경우
+            }
+
+            console.debug(`[API Route] Matching Lab ID: ${lab.id} (Normalized: ${normalizedLabId}) with ORCID Item. Found: ${!!matchedOrcidItem}, Similarity: ${finalSimilarityScore}, LLM MatchRate: ${lab.matchRate}, Final MatchRate: ${finalMatchRate}`);
+
+            return {
+                ...lab,
+                id: lab.id || matchedOrcidItem?.id || `temp-final-lab-${Date.now()}`, // ID 최종 결정
+                similarityScore: finalSimilarityScore,
+                matchRate: finalMatchRate
+            };
+        });
+
+        if (recommendedLabs.length === 0 && MOCK_API_RESPONSE.length > 0 && !DEEPSEEK_API_KEY) { // API 키 없을때만 목업 확실히
+            console.warn("[API Route] No recommendations from DeepSeek (and API key missing), falling back to mock data.");
+            recommendedLabs = MOCK_API_RESPONSE;
+        } else if (recommendedLabs.length === 0 && orcidResults.length > 0) { // API는 있었지만 결과가 없을 때
+             console.warn("[API Route] No recommendations from DeepSeek (but API key exists), attempting to return mock if available or empty.");
+             // 여기서 목업 데이터를 강제로 반환할지, 아니면 빈 배열을 그대로 둘지 정책 결정 필요
+             // MOCK_API_RESPONSE는 API 키가 없을 때의 최후 수단으로 남겨두는 것이 좋을 수 있음
         }
 
         if (recommendedLabs.length > 0) {
