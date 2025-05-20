@@ -16,7 +16,7 @@ const DEEPSEEK_BASE_URL = process.env.DEEPSEEK_BASE_URL || "https://api.deepseek
 const DEEPSEEK_CHAT_ENDPOINT = "/v1/chat/completions"; // 채팅 엔드포인트
 const DEEPSEEK_EMBEDDING_ENDPOINT = process.env.DEEPSEEK_EMBEDDING_ENDPOINT || "/v1/embeddings"; // 기본 임베딩 엔드포인트, .env.local에서 설정 권장
 const DEEPSEEK_CHAT_MODEL = "deepseek-chat"; // 기존 채팅 모델
-const DEEPSEEK_EMBEDDING_MODEL = process.env.DEEPSEEK_EMBEDDING_MODEL || "deepseek-embed"; // 예시 임베딩 모델
+const DEEPSEEK_EMBEDDING_MODEL = process.env.DEEPSEEK_EMBEDDING_MODEL || "deepseek-chat"; // 예시 임베딩 모델
 // DeepSeek 임베딩 API 응답에서 실제 벡터 경로 (예: data.0.embedding_vector)
 const DEEPSEEK_EMBEDDING_VECTOR_PATH = process.env.DEEPSEEK_EMBEDDING_VECTOR_PATH || "data.0.embedding"; // 기본값은 이전 코드와 동일하게, 필요시 .env로 수정
 
