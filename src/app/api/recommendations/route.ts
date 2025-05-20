@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import OpenAI from 'openai';
 
 // --- 환경 변수 로드 ( 실제 배포 환경에서는 빌드 시점에 주입됨 ) ---
 // 로컬 개발 시 .env.local 파일에 아래와 같이 키를 설정해야 합니다.
@@ -10,14 +9,14 @@ import OpenAI from 'openai';
 
 const ORCID_API_BASE_URL = process.env.ORCID_API_BASE_URL || "https://pub.orcid.org/v3.0";
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+// const OPENAI_API_KEY = process.env.OPENAI_API_KEY; // OpenAI API 키 변수 제거
 
-let openai: OpenAI | null = null;
-if (OPENAI_API_KEY) {
-  openai = new OpenAI({ apiKey: OPENAI_API_KEY });
-} else {
-  console.warn("[API Route] OPENAI_API_KEY is not set. Career scenario generation will be skipped.");
-}
+// let openai: OpenAI | null = null; // OpenAI 클라이언트 변수 제거
+// if (OPENAI_API_KEY) {
+// openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+// } else {
+// console.warn("[API Route] OPENAI_API_KEY is not set. Career scenario generation will be skipped.");
+// }
 
 const recommendationRequestSchema = z.object({
   major: z.string().min(1, "전공은 필수입니다."),
@@ -218,27 +217,52 @@ async function analyzeWithDeepSeek(userProfile: z.infer<typeof recommendationReq
 }
 
 async function generateCareerScenario(labName: string, labKeywords: string[]): Promise<string> {
-  if (!openai) {
-    return "[OpenAI 연동 없음] AI 기반 커리어 시나리오 생성 기능이 현재 비활성화되어 있습니다.";
+  if (!DEEPSEEK_API_KEY) {
+    console.warn("[API Route] DEEPSEEK_API_KEY is not set. Career scenario generation will be skipped.");
+    return "[DeepSeek 연동 없음] AI 기반 커리어 시나리오 생성 기능이 현재 비활성화되어 있습니다. (API 키 누락)";
   }
-  const prompt = `당신은 IT/과학 분야 커리어 컨설턴트입니다. 연구소 "${labName}" (주요 연구 키워드: ${labKeywords.join(", ")})에 합류했을 때 예상되는 커리어 비전, 성장 기회, 네트워킹 이점 등을 1~2문장으로 간결하고 매력적으로 요약해주세요. (100자 이내)`;
+
+  const prompt = `당신은 IT/과학 분야 커리어 컨설턴트입니다. 다음 연구소에 합류했을 때 예상되는 커리어 비전, 성장 기회, 네트워킹 이점 등을 1~2문장으로 간결하고 매력적으로 요약해주세요. (100자 이내)
+
+연구소 이름: "${labName}"
+주요 연구 키워드: ${labKeywords.join(", ")}
+
+요약:`;
+
   try {
-    console.log(`[API Route] Generating career scenario for ${labName} with OpenAI...`);
-    const completion = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
-      messages: [{ role: "user", content: prompt }],
-      max_tokens: 80, 
-      temperature: 0.6,
+    console.log(`[API Route] Generating career scenario for ${labName} with DeepSeek API...`);
+    const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${DEEPSEEK_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "deepseek-chat", // 또는 사용하고자 하는 DeepSeek 모델
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 100, // 커리어 시나리오 길이에 맞게 조절
+        temperature: 0.5, // 약간의 창의성을 위해 0.5로 설정, 필요시 조절
+      }),
     });
-    const scenario = completion.choices[0]?.message?.content?.trim();
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      console.error(`[API Route] DeepSeek API Error (Career Scenario): ${response.status} - ${errorBody}`);
+      throw new Error(`DeepSeek API 요청 실패 (커리어 시나리오, 상태: ${response.status}). 응답: ${errorBody.substring(0,100)}`);
+    }
+
+    const result = await response.json();
+    const scenario = result.choices?.[0]?.message?.content?.trim();
+
     if (!scenario) {
-        console.warn("[API Route] OpenAI returned empty scenario.");
-        return "해당 연구소의 커리어 정보를 AI가 생성하지 못했습니다. 직접 탐색해보세요.";
+      console.warn("[API Route] DeepSeek (Career Scenario) returned empty scenario.");
+      return "해당 연구소의 커리어 정보를 AI가 생성하지 못했습니다. 직접 탐색해보세요.";
     }
     return scenario;
   } catch (error: any) {
-    console.error("[API Route] OpenAI API request failed:", error.message);
-    return "[오류] AI 커리어 시나리오 생성 중 문제가 발생했습니다.";
+    console.error("[API Route] DeepSeek API request failed (Career Scenario):", error.message);
+    // error.details 등을 포함하여 더 자세한 오류 정보를 반환할 수 있습니다.
+    return `[오류] AI 커리어 시나리오 생성 중 문제가 발생했습니다: ${error.message}`;
   }
 }
 
@@ -270,13 +294,13 @@ export async function POST(request: Request) {
             // 사용자에게 알릴 수 있는 메시지 추가 가능성
         }
 
-        if (openai) {
+        if (recommendedLabs.length > 0) {
             for (let lab of recommendedLabs) {
                 if (!lab.careerScenario || lab.careerScenario.includes("생성 예정")) {
                     lab.careerScenario = await generateCareerScenario(lab.name, lab.keywords);
                 }
             }
-            console.log("[API Route] Career scenarios generated with OpenAI.");
+            console.log("[API Route] Career scenarios generated with DeepSeek API.");
         }
         
         console.log("[API Route] Final recommendations being sent:", recommendedLabs.slice(0,1)); // 첫번째 결과만 로그 (데이터량 조절)
