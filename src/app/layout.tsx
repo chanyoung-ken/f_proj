@@ -1,12 +1,8 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css"; // Tailwind CSS 및 global styles
-import { ThemeProvider } from "@/components/theme-provider"; // shadcn-ui 테마 프로바이더 (설치 필요)
-import { ToastProvider } from "@/components/ui/toast"; // Shadcn 문서대로라면 ToastProvider가 없을 수 있음.
-                                                      // 일반적으로 Toaster를 사용하고 useToast로 호출함.
-                                                      // 만약 shadcn-ui가 ToastProvider를 제공한다면 이 경로가 맞을 수 있음.
-                                                      // 보통은 ToastProvider 대신 Toaster를 RootLayout에 둡니다.
-import { Toaster as RadixToaster } from "@/components/ui/toaster"; // shadcn의 Toaster를 명시적으로 사용
+import { ThemeProvider } from "@/components/theme-provider"; // 방금 생성한 ThemeProvider
+import { Toaster } from "@/components/ui/toaster"; // 기존 Toaster 사용
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -24,15 +20,13 @@ export default function RootLayout({
     <html lang="ko" suppressHydrationWarning>
       <body className={inter.className}>
         <ThemeProvider
-          attribute="class"
+          attribute="class" // next-themes의 ThemeProvider에 전달될 props
           defaultTheme="system"
           enableSystem
-          disableTransitionOnChange
+          disableTransitionOnChange // Next.js 13+ App Router와 함께 사용할 때 깜빡임 방지
         >
-          {/* <ToastProvider> // Shadcn UI의 일반적인 패턴은 ToastProvider가 아닌 Toaster를 사용합니다. */}
-            {children}
-            <RadixToaster /> {/* Toaster를 여기에 배치합니다. */} 
-          {/* </ToastProvider> */}
+          {children}
+          <Toaster /> 
         </ThemeProvider>
       </body>
     </html>
