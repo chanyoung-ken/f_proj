@@ -6,12 +6,15 @@ import { z } from "zod";
 // ORCID_API_BASE_URL=https://pub.orcid.org/v3.0
 // DEEPSEEK_API_KEY=your_deepseek_api_key
 // DEEPSEEK_BASE_URL=https://api.deepseek.com (예시, 실제 URL 확인 필요)
+// DEEPSEEK_EMBEDDING_ENDPOINT=/v1/embeddings (예시, 실제 엔드포인트 확인 필요)
 // DEEPSEEK_EMBEDDING_MODEL=deepseek-embed (예시, 실제 모델명 확인 필요)
 // DEEPSEEK_EMBEDDING_VECTOR_PATH=data.0.embedding_vector (예시, 실제 경로 확인 필요)
 
 const ORCID_API_BASE_URL = process.env.ORCID_API_BASE_URL || "https://pub.orcid.org/v3.0";
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 const DEEPSEEK_BASE_URL = process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com";
+const DEEPSEEK_CHAT_ENDPOINT = "/v1/chat/completions"; // 채팅 엔드포인트
+const DEEPSEEK_EMBEDDING_ENDPOINT = process.env.DEEPSEEK_EMBEDDING_ENDPOINT || "/v1/embeddings"; // 기본 임베딩 엔드포인트, .env.local에서 설정 권장
 const DEEPSEEK_CHAT_MODEL = "deepseek-chat"; // 기존 채팅 모델
 const DEEPSEEK_EMBEDDING_MODEL = process.env.DEEPSEEK_EMBEDDING_MODEL || "deepseek-embed"; // 예시 임베딩 모델
 // DeepSeek 임베딩 API 응답에서 실제 벡터 경로 (예: data.0.embedding_vector)
@@ -135,7 +138,7 @@ async function embedTextWithDeepSeek(text: string): Promise<number[] | null> {
     return null;
   }
 
-  const embeddingUrl = `${DEEPSEEK_BASE_URL}/v1/embeddings`; // DeepSeek 임베딩 엔드포인트 확인 필요
+  const embeddingUrl = `${DEEPSEEK_BASE_URL}${DEEPSEEK_EMBEDDING_ENDPOINT}`; 
   console.log(`[API Route] Requesting embedding for text (first 50 chars): "${text.substring(0, 50)}..." from ${embeddingUrl}`);
 
   try {
@@ -256,7 +259,7 @@ JSON 응답 형식:
 
   try {
     console.log("[API Route] Sending request to DeepSeek API (Chat Completion)...");
-    const response = await fetch(`${DEEPSEEK_BASE_URL}/v1/chat/completions`, {
+    const response = await fetch(`${DEEPSEEK_BASE_URL}${DEEPSEEK_CHAT_ENDPOINT}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${DEEPSEEK_API_KEY}` },
       body: JSON.stringify({
@@ -349,7 +352,7 @@ async function generateCareerScenario(labName: string, labKeywords: string[]): P
 
   try {
     console.log(`[API Route] Generating career scenario for ${labName} with DeepSeek API...`);
-    const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
+    const response = await fetch(`${DEEPSEEK_BASE_URL}${DEEPSEEK_CHAT_ENDPOINT}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
