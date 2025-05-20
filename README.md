@@ -1,92 +1,86 @@
-이 프로젝트는 [`EasyNext`](https://github.com/easynext/easynext)를 사용해 생성된 [Next.js](https://nextjs.org) 프로젝트입니다.
+# LabFinder+ : AI 기반 연구소·연구실 추천 및 멘토 매칭 웹서비스
 
-## Getting Started
+## (1) 프로젝트 목표
 
-개발 서버를 실행합니다.<br/>
-환경에 따른 명령어를 사용해주세요.
+- **사용자 맞춤 추천**: 사용자의 전공, 관심 키워드, 학력 정보를 기반으로 최적의 연구소 및 연구실을 추천합니다.
+- **멘토 연결**: 추천된 연구소 내에서 활동 중인 주요 연구자(교수, 책임 연구원, 박사 과정생 등)를 멘토 후보로 제시합니다.
+- **정보 제공**: 각 연구소의 주요 프로젝트, 연구 분야, 논문 트렌드, 대표 연구자의 커리어 경로 등 상세 정보를 시각화하여 제공합니다.
+- **궁극적 가치**: 대학(원)생 및 초기 경력 연구자들이 "어떤 연구소·연구실에서, 누구를 멘토로 삼으면 좋을지"에 대한 해답을 찾도록 돕습니다.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## (2) 대상 사용자
 
-브라우저에서 [http://localhost:3000](http://localhost:3000)을 열어 결과를 확인할 수 있습니다.
+- **학부생 및 석사 진학 준비생**: 자신의 연구 관심사와 적성에 맞는 연구실을 선택하는 데 도움을 받습니다.
+- **박사 과정생 및 포닥 준비생**: 관심 분야의 연구소 네트워크를 확장하고 새로운 연구 기회를 탐색합니다.
+- **연구소 취업 준비생**: 선호하는 연구 분야의 연구소를 분석하고, 해당 분야의 선배 연구자 정보를 파악합니다.
 
-`app/page.tsx` 파일을 수정하여 페이지를 편집할 수 있습니다. 파일을 수정하면 자동으로 페이지가 업데이트됩니다.
+## (3) 핵심 기능
 
-## 기본 포함 라이브러리
+1.  **프로필 입력**:
+    *   사용자의 전공, 관심 키워드(여러 개 입력 가능), 현재 학력(학부, 석사, 박사 등)을 입력받는 폼을 제공합니다.
+2.  **연구소/연구실 추천 엔진**:
+    *   ORCID API를 통해 연구자들의 최신 연구 성과 및 키워드를 실시간으로 수집합니다.
+    *   DeepSeek API (또는 유사 언어 모델 API)를 활용하여 수집된 데이터와 사용자 입력 정보 간의 유사도를 분석합니다.
+    *   분석 결과를 바탕으로 사용자에게 가장 적합한 Top 5 연구소/연구실을 선별하여 추천합니다.
+3.  **기관 상세 정보 뷰**:
+    *   추천된 각 연구소/연구실의 주요 진행 프로젝트 목록을 보여줍니다.
+    *   최근 출판된 논문들의 트렌드를 차트 형태로 시각화하여 제공합니다. (예: 연도별 논문 수, 주요 연구 분야 변화)
+    *   연구실의 규모(소속 연구원 수, 학생 수 등) 및 구성원 정보를 제공합니다.
+4.  **멘토 후보 리스트**:
+    *   추천된 각 기관 내에서 활발히 활동 중인 주요 연구자(교수, 책임연구원, 박사 과정 선배 등) Top 3를 멘토 후보로 제시합니다.
+    *   멘토 후보의 사진, 이름, 현재 직책, 간략한 연구 분야 및 주요 성과를 요약하여 보여줍니다.
+5.  **AI 기반 커리어 시나리오 제공**:
+    *   OpenAI GPT 또는 Gemini API를 활용하여, 특정 연구소를 선택했을 경우 예상되는 커리어 발전 경로에 대한 코멘트를 생성하여 제공합니다.
+    *   (예: "이 연구실은 최근 3년간 AI 신약 개발 분야에서 주목받는 연구를 다수 발표했으며, 졸업생들은 주로 글로벌 제약사의 AI 연구팀이나 관련 스타트업으로 진출하는 경향이 있습니다.")
 
-- [Next.js](https://nextjs.org)
-- [React](https://react.dev)
-- [Tailwind CSS](https://tailwindcss.com)
-- [TypeScript](https://www.typescriptlang.org)
-- [ESLint](https://eslint.org)
-- [Prettier](https://prettier.io)
-- [Shadcn UI](https://ui.shadcn.com)
-- [Lucide Icon](https://lucide.dev)
-- [date-fns](https://date-fns.org)
-- [react-use](https://github.com/streamich/react-use)
-- [es-toolkit](https://github.com/toss/es-toolkit)
-- [Zod](https://zod.dev)
-- [React Query](https://tanstack.com/query/latest)
-- [React Hook Form](https://react-hook-form.com)
-- [TS Pattern](https://github.com/gvergnaud/ts-pattern)
+## (4) UI/UX 개요
 
-## 사용 가능한 명령어
+-   **메인 페이지**:
+    *   서비스 소개 및 핵심 가치 전달.
+    *   사용자 프로필(전공, 관심 키워드, 학력) 입력을 위한 간결한 카드 형태의 폼 제공.
+    *   "나에게 맞는 연구소 찾기" CTA 버튼.
+-   **결과 대시보드 페이지**:
+    *   **상단**: 추천된 연구소/연구실 리스트 (로고, 명칭, 핵심 키워드, 사용자 입력과의 일치도 % 표시).
+    *   **중앙**: 사용자가 리스트에서 특정 연구소를 선택하면, 해당 연구소의 상세 정보(주요 프로젝트, 논문 트렌드 그래프, 연구 분야 태그 클라우드 등)를 동적으로 표시.
+    *   **하단**: 선택된 연구소에서 활동 중인 멘토 후보 리스트 (사진, 이름, 직책, 간략 프로필, 주요 연구 분야).
+-   **디자인 컨셉**:
+    *   **모던하고 직관적인 인터페이스**: 사용자가 쉽게 정보를 탐색하고 이해할 수 있도록 디자인.
+    *   **데이터 시각화 강조**: 차트, 그래프, 태그 클라우드 등을 적극 활용하여 복잡한 데이터를 효과적으로 전달.
+    *   **반응형 웹 디자인**: 데스크톱, 태블릿, 모바일 등 다양한 디바이스에서 최적화된 사용자 경험 제공.
 
-한글버전 사용
+## (5) 기술 스택 및 API 활용
 
-```sh
-easynext lang ko
-```
+-   **Frontend**: Next.js (React 기반), TypeScript, Tailwind CSS, shadcn-ui
+-   **Backend**: Node.js, Express (또는 Next.js API Routes 활용)
+-   **Database**: MongoDB (추천 결과 캐싱, 사용자 프로필 저장 등)
+-   **상태 관리**: Zustand 또는 React Query
+-   **폼 관리**: React Hook Form, Zod (유효성 검사)
+-   **AI API**:
+    *   OpenAI GPT / Google Gemini API: 커리어 시나리오 생성.
+-   **외부 데이터 API**:
+    *   ORCID Public API: 연구자 및 연구기관 정보, 연구 성과, 키워드 실시간 검색 및 수집 (Solr 기반 `/search` 엔드포인트 활용).
+    *   DeepSeek API (또는 유사 언어 모델 API): ORCID로부터 수집한 텍스트 데이터(논문 초록, 연구 분야 설명 등)와 사용자 입력 키워드 간의 의미적 유사도 분석 및 추천 로직 수행.
+-   **배포**:
+    *   Frontend: Vercel
+    *   Backend: Heroku, AWS Elastic Beanstalk, 또는 Vercel (Serverless Functions)
+-   **CI/CD**: GitHub Actions
 
-최신버전으로 업데이트
+### 실시간 검색 및 AI 통합 워크플로우 예시
 
-```sh
-npm i -g @easynext/cli@latest
-# or
-yarn add -g @easynext/cli@latest
-# or
-pnpm add -g @easynext/cli@latest
-```
+1.  사용자가 프론트엔드에서 자신의 프로필(전공, 관심 키워드 등)을 입력하고 "연구소 찾기" 버튼 클릭.
+2.  프론트엔드는 백엔드 API에 사용자 입력 정보를 전달하며 추천 요청.
+3.  백엔드는 사용자 키워드를 기반으로 ORCID `/search` API를 호출하여 관련 연구자, 논문, 기관 정보를 실시간으로 획득.
+4.  백엔드는 ORCID로부터 받은 JSON 형식의 응답 데이터(예: 논문 초록, 연구자 프로필)를 정제.
+5.  정제된 텍스트 데이터를 DeepSeek API (또는 선택한 LLM API)에 전달하여 사용자 관심 키워드와의 유사도 분석 및 추천 대상 연구소/연구실 후보군 선별 요청.
+6.  DeepSeek API로부터 분석 결과 및 추천 후보군을 JSON 형태로 수신.
+7.  백엔드는 이 정보를 바탕으로 최종 추천 리스트(Top 5 연구소, 각 연구소별 Top 3 멘토)를 구성하고, 필요한 경우 OpenAI/Gemini API를 호출하여 커리어 시나리오 코멘트 생성.
+8.  최종 결과를 프론트엔드에 전달하여 결과 대시보드에 렌더링.
 
-Supabase 설정
+## (6) 배포 계획
 
-```sh
-easynext supabase
-```
+1.  **환경 변수 관리**: 모든 API 키 및 주요 설정 정보는 `.env` 파일을 통해 안전하게 관리.
+2.  **CI/CD 자동화**: GitHub Actions를 활용하여 `main` 브랜치에 푸시될 때마다 Vercel(프론트엔드) 및 백엔드 호스팅 플랫폼으로 자동 배포 설정.
+3.  **커스텀 도메인 연결**: 서비스 정식 오픈 시 `labfinderplus.ai` (예시)와 같은 커스텀 도메인 연결.
 
-Next-Auth 설정
+---
 
-```sh
-easynext auth
-
-# ID,PW 로그인
-easynext auth idpw
-# 카카오 로그인
-easynext auth kakao
-```
-
-유용한 서비스 연동
-
-```sh
-# Google Analytics
-easynext gtag
-
-# Microsoft Clarity
-easynext clarity
-
-# ChannelIO
-easynext channelio
-
-# Sentry
-easynext sentry
-
-# Google Adsense
-easynext adsense
-```
+이 문서는 LabFinder+ 프로젝트의 초기 기획안이며, 개발 과정에서 세부 내용은 변경될 수 있습니다. 
